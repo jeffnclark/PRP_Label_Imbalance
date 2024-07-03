@@ -1,0 +1,7 @@
+venv/
+venv_xrays/
+saved_models/
+Data/
+__pycache__/
+pretrained_models/
+.idea/
