@@ -1,7 +1,7 @@
 base_architecture = 'resnet34'
 img_size = 224
 prototype_shape = (20, 128, 1, 1)
-num_classes = 2
+num_classes = 14
 prototype_activation_function = 'log'
 add_on_layers_type = 'regular'
 
@@ -11,8 +11,9 @@ data_home = 'Data/chestxray/Pneumonia/'
 data_path = data_home + 'Combined-p-0-ChestXray14/'
 
 
-## Train
-results_path = 'results/'+data_path.split('/')[-3]+'/'+data_path.split('/')[-2]+'/'
+# Train
+results_path = 'results/' + \
+    data_path.split('/')[-3]+'/'+data_path.split('/')[-2]+'/'
 train_dir = data_path + 'Train/'
 test_dir = data_path + 'Valid/'
 train_push_dir = data_path + 'Train/'
@@ -42,15 +43,14 @@ num_train_epochs = 31
 num_warm_epochs = 5
 
 push_start = 10
-push_epochs = [i for i in range(epoch_start,num_train_epochs) if i % 10 == 0]
+push_epochs = [i for i in range(epoch_start, num_train_epochs) if i % 10 == 0]
 
 
-
- #### Test
+# Test
 load_model_dir = "saved_models"
 load_model_name = "0H1-100H2-50_push1.0000.pth"
 
-test_image_dir =  data_home + 'Test-100-p-d2/Pneumonia/'
+test_image_dir = data_home + 'Test-100-p-d2/Pneumonia/'
 test_image_name = 'patient04665-study2-view1_frontal.jpg'
 
 prototype_number = 18
