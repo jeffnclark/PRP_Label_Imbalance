@@ -1,6 +1,3 @@
-'Code from Official ProtoPNet implemetation: https://github.com/cfchen-duke/ProtoPNet'
-
-
 import math
 
 def compute_layer_rf_info(layer_filter_size, layer_stride, layer_padding,

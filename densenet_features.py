@@ -1,6 +1,3 @@
-'Code from Official ProtoPNet implemetation: https://github.com/cfchen-duke/ProtoPNet'
-
-
 import re
 import torch
 import torch.nn as nn
