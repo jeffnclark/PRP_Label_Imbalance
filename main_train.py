@@ -1,3 +1,15 @@
+import test as tnt_2
+from settings import results_path
+import copy
+from settings import num_train_epochs, num_warm_epochs, push_start, push_epochs, epoch_start
+from settings import coefs
+from settings import last_layer_optimizer_lr
+from settings import warm_optimizer_lrs
+from settings import joint_optimizer_lrs, joint_lr_step_size
+from settings import train_dir, test_dir, train_push_dir, \
+    train_batch_size, test_batch_size, train_push_batch_size
+from settings import base_architecture, img_size, prototype_shape, num_classes, \
+    prototype_activation_function, add_on_layers_type, experiment_run
 import os
 import shutil
 
@@ -30,19 +42,19 @@ from lrp_resnet_canonized_poolconv_prototypes import *
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-wandb.init(project='ProtoPNet-Xray', entity='sga069')
+wandb.init(project='X-ray-imbalance',  # entity='sga069'
+           )
 
 config = wandb.config
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-gpuid', nargs=1, type=str, default='0') # python3 main.py -gpuid=0,1,2,3
+# python3 main.py -gpuid=0,1,2,3
+parser.add_argument('-gpuid', nargs=1, type=str, default='0')
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpuid[0]
 print(os.environ['CUDA_VISIBLE_DEVICES'])
 
 # book keeping namings and code
-from settings import base_architecture, img_size, prototype_shape, num_classes, \
-                     prototype_activation_function, add_on_layers_type, experiment_run
 
 base_architecture_type = re.match('^[a-z]*', base_architecture).group(0)
 
@@ -50,11 +62,13 @@ model_dir = './saved_models/' + base_architecture + '/' + experiment_run + '/'
 makedir(model_dir)
 shutil.copy(src=os.path.join(os.getcwd(), __file__), dst=model_dir)
 shutil.copy(src=os.path.join(os.getcwd(), 'settings.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), base_architecture_type + '_features.py'), dst=model_dir)
+shutil.copy(src=os.path.join(
+    os.getcwd(), base_architecture_type + '_features.py'), dst=model_dir)
 shutil.copy(src=os.path.join(os.getcwd(), 'model.py'), dst=model_dir)
 shutil.copy(src=os.path.join(os.getcwd(), 'train_and_test.py'), dst=model_dir)
 
-log, logclose = create_logger(log_filename=os.path.join(model_dir, 'train.log'))
+log, logclose = create_logger(
+    log_filename=os.path.join(model_dir, 'train.log'))
 img_dir = os.path.join(model_dir, 'img')
 makedir(img_dir)
 weight_matrix_filename = 'outputL_weights'
@@ -63,8 +77,6 @@ prototype_self_act_filename_prefix = 'prototype-self-act'
 proto_bound_boxes_filename_prefix = 'bb'
 
 # load the data
-from settings import train_dir, test_dir, train_push_dir, \
-                     train_batch_size, test_batch_size, train_push_batch_size
 
 normalize = transforms.Normalize(mean=mean,
                                  std=std)
@@ -116,7 +128,7 @@ ppnet = model.construct_PPNet(base_architecture=base_architecture,
                               num_classes=num_classes,
                               prototype_activation_function=prototype_activation_function,
                               add_on_layers_type=add_on_layers_type)
-#if prototype_activation_function == 'linear':
+# if prototype_activation_function == 'linear':
 #    ppnet.set_last_layer_incorrect_connection(incorrect_strength=0)
 # best_model_path = 'saved_models/resnet34/26-08-2021-Combined-orig/40_push0.6774.pth'
 # ppnet.load_state_dict(torch.load(best_model_path), strict=False)
@@ -127,31 +139,31 @@ class_specific = True
 wandb.watch(ppnet, log="all")
 
 # define optimizer
-from settings import joint_optimizer_lrs, joint_lr_step_size
 joint_optimizer_specs = \
-[{'params': ppnet.features.parameters(), 'lr': joint_optimizer_lrs['features'], 'weight_decay': 1e-3}, # bias are now also being regularized
- {'params': ppnet.add_on_layers.parameters(), 'lr': joint_optimizer_lrs['add_on_layers'], 'weight_decay': 1e-3},
- {'params': ppnet.prototype_vectors, 'lr': joint_optimizer_lrs['prototype_vectors']},
-]
+    [{'params': ppnet.features.parameters(), 'lr': joint_optimizer_lrs['features'], 'weight_decay': 1e-3},  # bias are now also being regularized
+     {'params': ppnet.add_on_layers.parameters(
+     ), 'lr': joint_optimizer_lrs['add_on_layers'], 'weight_decay': 1e-3},
+        {'params': ppnet.prototype_vectors,
+            'lr': joint_optimizer_lrs['prototype_vectors']},
+     ]
 joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
-joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=joint_lr_step_size, gamma=0.1)
+joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(
+    joint_optimizer, step_size=joint_lr_step_size, gamma=0.1)
 
-from settings import warm_optimizer_lrs
 warm_optimizer_specs = \
-[{'params': ppnet.add_on_layers.parameters(), 'lr': warm_optimizer_lrs['add_on_layers'], 'weight_decay': 1e-3},
- {'params': ppnet.prototype_vectors, 'lr': warm_optimizer_lrs['prototype_vectors']},
-]
+    [{'params': ppnet.add_on_layers.parameters(), 'lr': warm_optimizer_lrs['add_on_layers'], 'weight_decay': 1e-3},
+     {'params': ppnet.prototype_vectors,
+         'lr': warm_optimizer_lrs['prototype_vectors']},
+     ]
 warm_optimizer = torch.optim.Adam(warm_optimizer_specs)
 
-from settings import last_layer_optimizer_lr
-last_layer_optimizer_specs = [{'params': ppnet.last_layer.parameters(), 'lr': last_layer_optimizer_lr}]
+last_layer_optimizer_specs = [
+    {'params': ppnet.last_layer.parameters(), 'lr': last_layer_optimizer_lr}]
 last_layer_optimizer = torch.optim.Adam(last_layer_optimizer_specs)
 
 # weighting of different training losses
-from settings import coefs
 
 # number of training epochs, number of warm epochs, push start epoch, push epochs
-from settings import num_train_epochs, num_warm_epochs, push_start, push_epochs, epoch_start
 
 # train the model
 log('start training')
@@ -160,8 +172,7 @@ best_epoch = 0
 best_protopnet_heatmaps = []
 best_prototype_images_path = []
 best_model = []
-import copy
-for epoch in range(epoch_start,num_train_epochs):
+for epoch in range(epoch_start, num_train_epochs):
     log('epoch: \t{0}'.format(epoch))
 
     if epoch < num_warm_epochs:
@@ -181,13 +192,16 @@ for epoch in range(epoch_start,num_train_epochs):
 
     if epoch >= push_start and epoch in push_epochs:
         protopnet_heatmaps_path, prototype_images_path = push.push_prototypes(
-            train_push_loader, # pytorch dataloader (must be unnormalized in [0,1])
-            prototype_network_parallel=ppnet_multi, # pytorch network with prototype_vectors
+            # pytorch dataloader (must be unnormalized in [0,1])
+            train_push_loader,
+            # pytorch network with prototype_vectors
+            prototype_network_parallel=ppnet_multi,
             class_specific=class_specific,
-            preprocess_input_function=preprocess_input_function, # normalize if needed
+            preprocess_input_function=preprocess_input_function,  # normalize if needed
             prototype_layer_stride=1,
-            root_dir_for_saving_prototypes=img_dir, # if not None, prototypes will be saved here
-            epoch_number=epoch, # if not provided, prototypes saved previously will be overwritten
+            # if not None, prototypes will be saved here
+            root_dir_for_saving_prototypes=img_dir,
+            epoch_number=epoch,  # if not provided, prototypes saved previously will be overwritten
             prototype_img_filename_prefix=prototype_img_filename_prefix,
             prototype_self_act_filename_prefix=prototype_self_act_filename_prefix,
             proto_bound_boxes_filename_prefix=proto_bound_boxes_filename_prefix,
@@ -211,14 +225,14 @@ for epoch in range(epoch_start,num_train_epochs):
                               class_specific=class_specific, coefs=coefs, log=log)
                 accu = tnt.test(model=ppnet_multi, dataloader=test_loader,
                                 class_specific=class_specific, log=log)
-                if(accu >= best_acc):
+                if (accu >= best_acc):
                     best_acc = accu
                     best_epoch = epoch
                     best_protopnet_heatmaps = protopnet_heatmaps_path
                     best_prototype_images_path = prototype_images_path
                     best_model = copy.deepcopy(ppnet)
-                    save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + '_'+ 'push', accu=accu,
-                                        target_accu=0.1, log=log)
+                    save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + '_' + 'push', accu=accu,
+                                                target_accu=0.1, log=log)
 
     wandb.log({
         "Test Acc": accu,
@@ -226,31 +240,32 @@ for epoch in range(epoch_start,num_train_epochs):
         "Best Epoch": best_epoch})
 
 
-
-
-from settings import results_path
-### Store prototype images
-prototype_image_dir = results_path+ '/prototype_images/prototype_images/'
+# Store prototype images
+prototype_image_dir = results_path + '/prototype_images/prototype_images/'
 makedir(prototype_image_dir)
 n_prototypes = ppnet_multi.module.num_prototypes
 for j in range(n_prototypes):
-    shutil.copy(best_prototype_images_path[j],prototype_image_dir+str(j)+'_original.png')
+    shutil.copy(best_prototype_images_path[j],
+                prototype_image_dir+str(j)+'_original.png')
 
-## ProtoPNet heatmaps
-protopnet_image_dir = results_path+ '/ProtoPNet_heatmaps/'
+# ProtoPNet heatmaps
+protopnet_image_dir = results_path + '/ProtoPNet_heatmaps/'
 makedir(protopnet_image_dir)
 n_prototypes = ppnet_multi.module.num_prototypes
 for j in range(n_prototypes):
-    shutil.copy(best_protopnet_heatmaps[j],protopnet_image_dir+str(j)+'_ppnet.png')
+    shutil.copy(best_protopnet_heatmaps[j],
+                protopnet_image_dir+str(j)+'_ppnet.png')
 
-## PRP
-PRP_path = results_path+ '/PRP_maps/'
+# PRP
+PRP_path = results_path + 'PRP_maps/'
 makedir(PRP_path)
 only_PRP_path = results_path+'PRP_maps/onlyPRP/'
 makedir(only_PRP_path)
-sim = run_prp(copy.deepcopy(best_model), results_path+ '/prototype_images/', n_prototypes, PRP_path)
+sim = run_prp(copy.deepcopy(best_model), results_path +
+              '/prototype_images/', n_prototypes, PRP_path)
 
-### Subplots
+
+# Subplots
 subplot_dir = results_path+'subplot/'
 makedir(subplot_dir)
 
@@ -265,18 +280,16 @@ for j in range(n_prototypes):
     axs[2].imshow(Image.open(PRP_path + str(j) + '-PRP.png'))
     axs[2].axis('off')
 
-    plt.title(str(np.round(sim[j],6)))
+    plt.title(str(np.round(sim[j], 6)))
     plt.show()
     plt.tight_layout()
     plt.savefig(subplot_dir+str(j)+".png")
 
 
-
-
-
-## Test accuracies save
-import test as tnt_2
+# Test accuracies save
 best_model_multi = torch.nn.DataParallel(best_model.to(device))
+
+
 def cm(test_dir, filename, class_names):
     print(test_dir)
     test_batch_size = 100
@@ -294,11 +307,7 @@ def cm(test_dir, filename, class_names):
     print('test set size: {0}'.format(len(test_loader.dataset)))
 
     accu, pred, true = tnt_2.test(model=best_model_multi, dataloader=test_loader,
-                                class_specific=class_specific, log=print)
-
-
-
+                                  class_specific=class_specific, log=print)
 
 
 logclose()
-
