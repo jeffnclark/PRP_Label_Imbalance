@@ -1,7 +1,9 @@
 base_architecture = 'resnet34'
 img_size = 224
-num_classes = 5
-prototype_shape = (num_classes*10, 128, 1, 1)
+num_classes = 3
+num_prototypes_per_class = 10
+total_prototypes = num_classes * num_prototypes_per_class
+prototype_shape = (total_prototypes, 128, 1, 1)
 prototype_activation_function = 'log'
 add_on_layers_type = 'regular'
 
@@ -39,7 +41,7 @@ coefs = {
 }
 
 epoch_start = 0
-num_train_epochs = 11
+num_train_epochs = 11  # Eventually switch back to 31
 num_warm_epochs = 5
 
 push_start = 10
