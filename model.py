@@ -52,11 +52,6 @@ class PPNet(nn.Module):
         Without domain specific knowledge we allocate the same number of
         prototypes for each class
         '''
-
-        # Print values for debugging
-        print(f"Number of Prototypes: {self.num_prototypes}")
-        print(f"Number of Classes: {self.num_classes}")
-
         assert (self.num_prototypes % self.num_classes == 0)
         # a onehot indication matrix for each prototype's class identity
         self.prototype_class_identity = torch.zeros(self.num_prototypes,

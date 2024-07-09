@@ -16,7 +16,7 @@ import torch.nn as nn
 from torchsummary import summary
 import torchvision
 from torchvision import datasets, models, transforms
-from torch.utils.data import  DataLoader
+from torch.utils.data import DataLoader
 from torchvision import transforms, utils
 from preprocess import mean, std, preprocess_input_function, undo_preprocess_input_function
 import model
@@ -31,7 +31,7 @@ try:
 except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 
-from resnet_features import BasicBlock,Bottleneck,ResNet_features
+from resnet_features import BasicBlock, Bottleneck, ResNet_features
 import torch.nn.functional as F
 
 #############
@@ -56,25 +56,26 @@ layers = []
 ##########
 
 
-
-#partial replacement of BN, use own classes, no pretrained loading
+# partial replacement of BN, use own classes, no pretrained loading
 
 
 class Cannotloadmodelweightserror(Exception):
-  pass
+    pass
 
-class  Modulenotfounderror(Exception):
-  pass
+
+class Modulenotfounderror(Exception):
+    pass
 
 
 class BasicBlock_fused(BasicBlock):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(BasicBlock_fused, self).__init__(inplanes, planes, stride, downsample)
+        super(BasicBlock_fused, self).__init__(
+            inplanes, planes, stride, downsample)
 
-        #own
-        self.elt=sum_stacked2() # eltwisesum2()
+        # own
+        self.elt = sum_stacked2()  # eltwisesum2()
 
     def forward(self, x):
         identity = x
@@ -89,13 +90,15 @@ class BasicBlock_fused(BasicBlock):
         if self.downsample is not None:
             identity = self.downsample(x)
 
-        #out += identity
-        #out = self.relu(out)
+        # out += identity
+        # out = self.relu(out)
 
-        out = self.elt( torch.stack([out,identity], dim=0) ) #self.elt(out,identity)
+        # self.elt(out,identity)
+        out = self.elt(torch.stack([out, identity], dim=0))
         out = self.relu(out)
 
         return out
+
 
 class Bottleneck_fused(Bottleneck):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
@@ -107,11 +110,11 @@ class Bottleneck_fused(Bottleneck):
     expansion = 4
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(Bottleneck_fused, self).__init__(inplanes, planes, stride, downsample)
- 
-        #own
-        self.elt=sum_stacked2() # eltwisesum2()
+        super(Bottleneck_fused, self).__init__(
+            inplanes, planes, stride, downsample)
 
+        # own
+        self.elt = sum_stacked2()  # eltwisesum2()
 
     def forward(self, x):
         identity = x
@@ -130,165 +133,169 @@ class Bottleneck_fused(Bottleneck):
         if self.downsample is not None:
             identity = self.downsample(x)
 
-        #out += identity
-        out = self.elt( torch.stack([out,identity], dim=0) ) #self.elt(out,identity)
+        # out += identity
+        # self.elt(out,identity)
+        out = self.elt(torch.stack([out, identity], dim=0))
         out = self.relu(out)
 
         return out
 
+
 class ResNet_canonized(ResNet_features):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False):
-        super(ResNet_canonized, self).__init__(block, layers, num_classes=1000, zero_init_residual=False)
+        super(ResNet_canonized, self).__init__(
+            block, layers, num_classes=1000, zero_init_residual=False)
 
         ######################
         # change
         ######################
-        #own
-        #self.avgpool = nn.AvgPool2d(kernel_size=7,stride=7 ) #nn.AdaptiveAvgPool2d((1, 1))
-
-        
+        # own
+        # self.avgpool = nn.AvgPool2d(kernel_size=7,stride=7 ) #nn.AdaptiveAvgPool2d((1, 1))
 
     # runs in your current module to find the object layer3.1.conv2, and replaces it by the obkect stored in value (see         success=iteratset(self,components,value) as initializer, can be modified to run in another class when replacing that self)
-    def setbyname(self,name,value):
+    def setbyname(self, name, value):
 
-        def iteratset(obj,components,value):
+        def iteratset(obj, components, value):
 
-          if not hasattr(obj,components[0]):
-            return False
-          elif len(components)==1:
-            setattr(obj,components[0],value)
-            #print('found!!', components[0])
-            #exit()
-            return True
-          else:
-            nextobj=getattr(obj,components[0])
-            return iteratset(nextobj,components[1:],value)
+            if not hasattr(obj, components[0]):
+                return False
+            elif len(components) == 1:
+                setattr(obj, components[0], value)
+                # print('found!!', components[0])
+                # exit()
+                return True
+            else:
+                nextobj = getattr(obj, components[0])
+                return iteratset(nextobj, components[1:], value)
 
-        components=name.split('.')
-        success=iteratset(self,components,value)
+        components = name.split('.')
+        success = iteratset(self, components, value)
         return success
 
-    def copyfromresnet(self,net, lrp_params, lrp_layer2method):
-      # assert( isinstance(net,ResNet))
+    def copyfromresnet(self, net, lrp_params, lrp_layer2method):
+        # assert( isinstance(net,ResNet))
 
+        # --copy linear
+        # --copy conv2, while fusing bns
+        # --reset bn
 
-      # --copy linear
-      # --copy conv2, while fusing bns
-      # --reset bn
+        # first conv, then bn,
+        # means: when encounter bn, find the conv before -- implementation dependent
 
-      # first conv, then bn,
-      #means: when encounter bn, find the conv before -- implementation dependent
+        updated_layers_names = []
 
+        last_src_module_name = None
+        last_src_module = None
 
-      updated_layers_names=[]
+        for src_module_name, src_module in net.named_modules():
+            print('at src_module_name', src_module_name)
 
-      last_src_module_name=None
-      last_src_module=None
+            foundsth = False
 
-      for src_module_name, src_module in net.named_modules():
-        print('at src_module_name', src_module_name )
+            if isinstance(src_module, nn.Linear):
+                # copy linear layers
+                foundsth = True
+                print('is Linear')
+                # m =  oneparam_wrapper_class( copy.deepcopy(src_module) , linearlayer_eps_wrapper_fct(), parameter1 = linear_eps )
+                wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                    src_module), lrp_params, lrp_layer2method)
+                print(wrapped)
+                # exit()
+                if False == self.setbyname(src_module_name, wrapped):
+                    raise Modulenotfounderror(
+                        "could not find module "+src_module_name + " in target net to copy")
+                updated_layers_names.append(src_module_name)
+            # end of if
 
-        foundsth=False
+            if isinstance(src_module, nn.Conv2d):
+                # store conv2d layers
+                foundsth = True
+                print('is Conv2d')
+                last_src_module_name = src_module_name
+                last_src_module = src_module
+            # end of if
 
+            if isinstance(src_module, nn.BatchNorm2d):
+                # conv-bn chain
+                foundsth = True
+                print('is BatchNorm2d')
 
-        if isinstance(src_module, nn.Linear):
-          #copy linear layers
-          foundsth=True
-          print('is Linear')
-          #m =  oneparam_wrapper_class( copy.deepcopy(src_module) , linearlayer_eps_wrapper_fct(), parameter1 = linear_eps )
-          wrapped = get_lrpwrapperformodule( copy.deepcopy(src_module) , lrp_params, lrp_layer2method)
-          print(wrapped)
-          # exit()
-          if False== self.setbyname(src_module_name, wrapped ):
-            raise Modulenotfounderror("could not find module "+src_module_name+ " in target net to copy" )
-          updated_layers_names.append(src_module_name)
-        # end of if
+                if (True == lrp_params['use_zbeta']) and (last_src_module_name == 'conv1'):
+                    thisis_inputconv_andiwant_zbeta = True
+                else:
+                    thisis_inputconv_andiwant_zbeta = False
 
+                m = copy.deepcopy(last_src_module)
+                m = bnafterconv_overwrite_intoconv(m, bn=src_module)
+                # wrap conv
+                wrapped = get_lrpwrapperformodule(
+                    m, lrp_params, lrp_layer2method, thisis_inputconv_andiwant_zbeta=thisis_inputconv_andiwant_zbeta)
+                print(wrapped)
+                # exit()
 
-        if isinstance(src_module, nn.Conv2d):
-          #store conv2d layers
-          foundsth=True
-          print('is Conv2d')
-          last_src_module_name=src_module_name
-          last_src_module=src_module
-        # end of if
+                if False == self.setbyname(last_src_module_name, wrapped):
+                    raise Modulenotfounderror(
+                        "could not find module "+last_src_module_name + " in target net to copy")
 
-        if isinstance(src_module, nn.BatchNorm2d):
-          # conv-bn chain
-          foundsth=True
-          print('is BatchNorm2d')
+                updated_layers_names.append(last_src_module_name)
 
-          if (True == lrp_params['use_zbeta']) and (last_src_module_name == 'conv1'):
-            thisis_inputconv_andiwant_zbeta = True
-          else:
-            thisis_inputconv_andiwant_zbeta = False
+                # wrap batchnorm
+                wrapped = get_lrpwrapperformodule(
+                    resetbn(src_module), lrp_params, lrp_layer2method)
+                print(wrapped)
+                # exit()
+                if False == self.setbyname(src_module_name, wrapped):
+                    raise Modulenotfounderror(
+                        "could not find module "+src_module_name + " in target net to copy")
+                updated_layers_names.append(src_module_name)
+            # end of if
 
-          m = copy.deepcopy(last_src_module)
-          m = bnafterconv_overwrite_intoconv(m , bn = src_module)
-          # wrap conv
-          wrapped = get_lrpwrapperformodule( m , lrp_params, lrp_layer2method, thisis_inputconv_andiwant_zbeta = thisis_inputconv_andiwant_zbeta )
-          print(wrapped)
-          # exit()
-          
-          if False== self.setbyname(last_src_module_name, wrapped  ):
-            raise Modulenotfounderror("could not find module "+last_src_module_name+ " in target net to copy" )
-        
-          updated_layers_names.append(last_src_module_name)
-          
-          # wrap batchnorm  
-          wrapped = get_lrpwrapperformodule( resetbn(src_module) , lrp_params, lrp_layer2method)
-          print(wrapped)
-          # exit()
-          if False== self.setbyname(src_module_name, wrapped ):
-            raise Modulenotfounderror("could not find module "+src_module_name+ " in target net to copy" )            
-          updated_layers_names.append(src_module_name)
-        # end of if
+            # if False== foundsth:
+            #  print('!untreated layer')
+            print('\n')
 
+        # sum_stacked2 is present only in the targetclass, so must iterate here
+        for target_module_name, target_module in self.named_modules():
 
-        #if False== foundsth:
-        #  print('!untreated layer')
-        print('\n')
-      
-      # sum_stacked2 is present only in the targetclass, so must iterate here
-      for target_module_name, target_module in self.named_modules():
+            if isinstance(target_module, (nn.ReLU, nn.AdaptiveAvgPool2d, nn.MaxPool2d)):
+                wrapped = get_lrpwrapperformodule(
+                    target_module, lrp_params, lrp_layer2method)
+                print(wrapped)
+                # exit()
+                if False == self.setbyname(target_module_name, wrapped):
+                    raise Modulenotfounderror(
+                        "could not find module "+src_module_name + " in target net to copy")
+                updated_layers_names.append(target_module_name)
 
-        if isinstance(target_module, (nn.ReLU, nn.AdaptiveAvgPool2d, nn.MaxPool2d)):
-          wrapped = get_lrpwrapperformodule( target_module , lrp_params, lrp_layer2method)
-          print(wrapped)
-          # exit()
-          if False== self.setbyname(target_module_name, wrapped ):
-            raise Modulenotfounderror("could not find module "+src_module_name+ " in target net to copy" )            
-          updated_layers_names.append(target_module_name)
+            if isinstance(target_module, sum_stacked2):
 
+                wrapped = get_lrpwrapperformodule(
+                    target_module, lrp_params, lrp_layer2method)
+                print(wrapped)
+                # exit()
+                if False == self.setbyname(target_module_name, wrapped):
+                    raise Modulenotfounderror(
+                        "could not find module "+target_module_name + " in target net , impossible!")
+                updated_layers_names.append(target_module_name)
 
-        if isinstance(target_module, sum_stacked2 ):
-
-          wrapped =  get_lrpwrapperformodule( target_module , lrp_params, lrp_layer2method)
-          print(wrapped)
-          # exit()
-          if False== self.setbyname(target_module_name, wrapped ):
-            raise Modulenotfounderror("could not find module "+target_module_name+ " in target net , impossible!" )            
-          updated_layers_names.append(target_module_name)
-      
-      for target_module_name, target_module in self.named_modules():
-        if target_module_name not in updated_layers_names:
-          print('not updated:', target_module_name)
-      
+        for target_module_name, target_module in self.named_modules():
+            if target_module_name not in updated_layers_names:
+                print('not updated:', target_module_name)
 
 
 class addon_canonized(nn.Module):
 
     def __init__(self):
         super(addon_canonized, self).__init__()
-        self.addon =  nn.Sequential(
-                nn.Conv2d(in_channels=512, out_channels=128, kernel_size=1),
-                nn.ReLU(),
-                nn.Conv2d(in_channels=128, out_channels=128, kernel_size=1),
-                nn.Sigmoid()
-                )
-          
-          
+        self.addon = nn.Sequential(
+            nn.Conv2d(in_channels=512, out_channels=128, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=1),
+            nn.Sigmoid()
+        )
+
+
 def _addon_canonized(pretrained=False, progress=True, **kwargs):
     model = addon_canonized()
     # if pretrained:
@@ -296,7 +303,6 @@ def _addon_canonized(pretrained=False, progress=True, **kwargs):
     return model
 
 
-         
 def _resnet_canonized(arch, block, layers, **kwargs):
     model = ResNet_canonized(block, layers, **kwargs)
     # if pretrained:
@@ -313,6 +319,7 @@ def resnet18_canonized(pretrained=False, progress=True, **kwargs):
     """
     return _resnet_canonized('resnet18', BasicBlock_fused, [2, 2, 2, 2], pretrained, progress, **kwargs)
 
+
 def resnet50_canonized(pretrained=False, progress=True, **kwargs):
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -323,7 +330,6 @@ def resnet50_canonized(pretrained=False, progress=True, **kwargs):
     return _resnet_canonized('resnet50', Bottleneck_fused, [3, 4, 6, 3], pretrained, progress, **kwargs)
 
 
-
 def resnet34_canonized(pretrained=False, progress=True, **kwargs):
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
@@ -332,7 +338,6 @@ def resnet34_canonized(pretrained=False, progress=True, **kwargs):
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     return _resnet_canonized('resnet34', BasicBlock_fused, [3, 4, 6, 3], **kwargs)
-
 
 
 def resnet152_canonized(pretrained=False, progress=True, **kwargs):
@@ -355,214 +360,212 @@ def resnet101_canonized(pretrained=False, progress=True, **kwargs):
     return _resnet_canonized('resnet101', Bottleneck_fused, [3, 4, 23, 3], **kwargs)
 
 
-
 def test_model3(dataloader, dataset_size, model, device):
 
-  from torchvision.models.resnet import ResNet, Bottleneck, BasicBlock
+    from torchvision.models.resnet import ResNet, Bottleneck, BasicBlock
 
-  model.train(False)
-  for data in dataloader:
-    # get the inputs
-    #inputs, labels, filenames = data
-    inputs=data['image']
-    labels=data['label']    
-    fns=data['filename']  
+    model.train(False)
+    for data in dataloader:
+        # get the inputs
+        # inputs, labels, filenames = data
+        inputs = data['image']
+        labels = data['label']
+        fns = data['filename']
 
-    inputs = inputs.to(device)
-    labels = labels.to(device)
+        inputs = inputs.to(device)
+        labels = labels.to(device)
 
-    with torch.no_grad():
-      outputs = model(inputs)
-      print('shp ', outputs.shape)
-      m=torch.mean(outputs)
-      m0=torch.mean(inputs)
-      print(m.item(), m0.item() )
-      print(fns)
+        with torch.no_grad():
+            outputs = model(inputs)
+            print('shp ', outputs.shape)
+            m = torch.mean(outputs)
+            m0 = torch.mean(inputs)
+            print(m.item(), m0.item())
+            print(fns)
 
 
 def test_model5(dataloader, dataset_size, model, device):
 
-  model.train(False)
-  pno = 27
-  
-  cls = 2
-  # foldername = "LISA-clean/LISA-"+str(pno)+"/"
-  
-  foldername = "LISA-clean/LISA-final-class2/"
-  # foldername = "resnet-34-horse-test/"+str(pno)+"/"
-  # foldername1 = "resnet-34-horse-test/120-130/correct/"
-  # foldername2 = "resnet-34-horse-test/120-130/wrong/"
-  # foldername = "resnet-152-horse-test/final_class12-epoch100/"
-  
-  # foldername1 = "resnet-34-airplane-test/0-10/correct/"
-  # foldername2 = "resnet-34-airplane-test/0-10/wrong/"
+    model.train(False)
+    pno = 27
 
-  for data in dataloader:
-    # get the inputs
-    #inputs, labels, filenames = data
-    inputs=data[0]
-    labels=data[1]    
-    fns=data[2]  
+    cls = 2
+    # foldername = "LISA-clean/LISA-"+str(pno)+"/"
 
-    inputs = inputs.to(device).clone()
-    labels = labels.to(device)
+    foldername = "LISA-clean/LISA-final-class2/"
+    # foldername = "resnet-34-horse-test/"+str(pno)+"/"
+    # foldername1 = "resnet-34-horse-test/120-130/correct/"
+    # foldername2 = "resnet-34-horse-test/120-130/wrong/"
+    # foldername = "resnet-152-horse-test/final_class12-epoch100/"
 
-    inputs.requires_grad=True
+    # foldername1 = "resnet-34-airplane-test/0-10/correct/"
+    # foldername2 = "resnet-34-airplane-test/0-10/wrong/"
 
-    # print(inputs.requires_grad)
-    with torch.enable_grad():
-      # outputs, _ = model(inputs)
-      
-      # distances = model.prototype_distances(inputs)
-      
-      conv_features = model.conv_features(inputs)
-      x2 = conv_features ** 2
-      x2_patch_sum = model.conv_layer1(x2)
-
-      p2 = model.prototype_vectors ** 2
-      p2 = torch.sum(p2, dim=(1, 2, 3))
-        # p2 is a vector of shape (num_prototypes,)
-        # then we reshape it to (num_prototypes, 1, 1)
-      p2_reshape = p2.view(-1, 1, 1)
-      
-      xp = model.conv_layer2(conv_features)
-      intermediate_result = - 2 * xp + p2_reshape  # use broadcast
-        # x2_patch_sum and intermediate_result are of the same shape
-      distances = model.relu_layer(x2_patch_sum + intermediate_result)
-      
-      
-        # global min pooling
-      # min_distances = -F.max_pool2d(-distances,kernel_size=(7,7))
-      min_distances = -model.max_layer(-distances)
-      min_distances = min_distances.view(-1, model.num_prototypes)
-      
-      
-    min_distances = torch.log((min_distances + 1) / (min_distances + model.epsilon))
-    
-    '''For whole classes'''
-    scores = model.last_layer(min_distances)
-    print(scores[:,cls])
-    (scores[:,cls]).backward()
-    
-    '''For only class cls'''
-    # scores = model.last_layer.weight.data[cls,cls*10:(cls+1)*10]*(min_distances[:,cls])
-    # # print(scores[:,cls])
-    # torch.sum(scores).backward()
-    
-    '''For individual prototype'''
-    # (min_distances[:,pno]).backward()
-
-    print(inputs.grad.shape)
-    rel=inputs.grad.data
-    print( torch.max(rel), torch.mean(rel) )
-
-    # clsss=get_classes()
-
-
-    with torch.no_grad():
-
-      # print('shp ', outputs.shape)
-      # vals,pred = torch.max(scores, dim=1)
-      # m=torch.mean(outputs)
-      # print(  vals.item(), clsss[cls.item()], m.item() )
-      print(fns)
-      # print(cls)
-      
-    # exit()
-    
-    print(fns[0].split("/")[2])
-    # if(pred==cls):
-    #     imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername1+fns[0].split("/")[2],name=fns[0].split("/")[3])
-    # else:
-    #     imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername2+fns[0].split("/")[2],name=fns[0].split("/")[3])
-        
-    # imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername+fns[0].split("/")[2],name=fns[0].split("/")[3])
-    imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername+fns[0].split("/")[3],name=fns[0].split("/")[4])
-
-
-def test_model_all(dataloader, dataset_size, model, device):
-
-  model.train(False)
-  pno = 27
-  
-  cls = 2
-  
-  # for pno in range(20,30):
-  for pno in range(122,123):
-      # foldername = "LISA-LRP-train-50/LISA-"+str(pno)+"/"
-      # foldername = "BD-LISA-LRP-train-20/LISA-"+str(pno)+"/"
-      foldername = "PVOC-LRP-train/PVOC-"+str(pno)+"/"
-      # foldername = "Edge-LISA-LRP-train-50/LISA-"+str(pno)+"/"
-      # foldername = "CLASS-LISA-LRP-train-50/LISA-"+str(pno)+"/"
-      for data in dataloader:
+    for data in dataloader:
         # get the inputs
-        inputs=data[0]
-        labels=data[1]    
-        fns=data[2]  
-    
+        # inputs, labels, filenames = data
+        inputs = data[0]
+        labels = data[1]
+        fns = data[2]
+
         inputs = inputs.to(device).clone()
         labels = labels.to(device)
-    
-        inputs.requires_grad=True
-    
-        print(inputs.requires_grad)
+
+        inputs.requires_grad = True
+
+        # print(inputs.requires_grad)
         with torch.enable_grad():
-          # outputs, _ = model(inputs)
-          
-          # distances = model.prototype_distances(inputs)
-          
-          conv_features = model.conv_features(inputs)
-          x2 = conv_features ** 2
-          x2_patch_sum = model.conv_layer1(x2)
-          print(x2_patch_sum.shape)
+            # outputs, _ = model(inputs)
 
+            # distances = model.prototype_distances(inputs)
 
-          p2 = model.prototype_vectors ** 2
-          p2 = torch.sum(p2, dim=(1, 2, 3))
-          # mysum = sum_lrp.apply
-          # p2 = mysum(p2)
+            conv_features = model.conv_features(inputs)
+            x2 = conv_features ** 2
+            x2_patch_sum = model.conv_layer1(x2)
 
-            # p2 is a vector of shape (num_prototypes,)
-            # then we reshape it to (num_prototypes, 1, 1)
-          p2_reshape = p2.view(-1, 1, 1)
-          
-          xp = model.conv_layer2(conv_features)
-          # print(xp.shape)
-          # print(p2_reshape.shape)
-          # exit()
-          intermediate_result = - 2 * xp + p2_reshape  # use broadcast
-            # x2_patch_sum and intermediate_result are of the same shape
-          distances = model.relu_layer(x2_patch_sum + intermediate_result)
-          
-          
-            # global min pooling
-          # min_distances = -F.max_pool2d(-distances,kernel_size=(7,7))
-          min_distances = -model.max_layer(-distances)
-          min_distances = min_distances.view(-1, model.num_prototypes)
-          
-          
-        min_distances = torch.log((min_distances + 1) / (min_distances + model.epsilon))
-        
+            p2 = model.prototype_vectors ** 2
+            p2 = torch.sum(p2, dim=(1, 2, 3))
+        # p2 is a vector of shape (num_prototypes,)
+        # then we reshape it to (num_prototypes, 1, 1)
+            p2_reshape = p2.view(-1, 1, 1)
+
+            xp = model.conv_layer2(conv_features)
+            intermediate_result = - 2 * xp + p2_reshape  # use broadcast
+        # x2_patch_sum and intermediate_result are of the same shape
+            distances = model.relu_layer(x2_patch_sum + intermediate_result)
+
+        # global min pooling
+            # min_distances = -F.max_pool2d(-distances,kernel_size=(7,7))
+            min_distances = -model.max_layer(-distances)
+            min_distances = min_distances.view(-1, model.num_prototypes)
+
+        min_distances = torch.log(
+            (min_distances + 1) / (min_distances + model.epsilon))
+
         '''For whole classes'''
-        # scores = model.last_layer(min_distances)
-        # print(scores[:,cls])
-        # (scores[:,cls]).backward()
-        
+        scores = model.last_layer(min_distances)
+        print(scores[:, cls])
+        (scores[:, cls]).backward()
+
         '''For only class cls'''
         # scores = model.last_layer.weight.data[cls,cls*10:(cls+1)*10]*(min_distances[:,cls])
         # # print(scores[:,cls])
         # torch.sum(scores).backward()
-        
+
         '''For individual prototype'''
-        (min_distances[:,pno]).backward()
-    
-        rel=inputs.grad.data
-        print( torch.max(rel), torch.mean(rel) )
-    
-        print(fns)
-        
-        imshow_im(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername,name=fns[0].split("/")[4])
-        # imshow_im(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername,name=fns[0].split("/")[3])
+        # (min_distances[:,pno]).backward()
+
+        print(inputs.grad.shape)
+        rel = inputs.grad.data
+        print(torch.max(rel), torch.mean(rel))
+
+        # clsss=get_classes()
+
+        with torch.no_grad():
+
+            # print('shp ', outputs.shape)
+            # vals,pred = torch.max(scores, dim=1)
+            # m=torch.mean(outputs)
+            # print(  vals.item(), clsss[cls.item()], m.item() )
+            print(fns)
+            # print(cls)
+
+        # exit()
+
+        print(fns[0].split("/")[2])
+        # if(pred==cls):
+        #     imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername1+fns[0].split("/")[2],name=fns[0].split("/")[3])
+        # else:
+        #     imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername2+fns[0].split("/")[2],name=fns[0].split("/")[3])
+
+        # imshow2(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername+fns[0].split("/")[2],name=fns[0].split("/")[3])
+        imshow2(rel.to('cpu'), imgtensor=inputs.to(
+            'cpu'), folder=foldername+fns[0].split("/")[3], name=fns[0].split("/")[4])
+
+
+def test_model_all(dataloader, dataset_size, model, device):
+
+    model.train(False)
+    pno = 27
+
+    cls = 2
+
+    # for pno in range(20,30):
+    for pno in range(122, 123):
+        # foldername = "LISA-LRP-train-50/LISA-"+str(pno)+"/"
+        # foldername = "BD-LISA-LRP-train-20/LISA-"+str(pno)+"/"
+        foldername = "PVOC-LRP-train/PVOC-"+str(pno)+"/"
+        # foldername = "Edge-LISA-LRP-train-50/LISA-"+str(pno)+"/"
+        # foldername = "CLASS-LISA-LRP-train-50/LISA-"+str(pno)+"/"
+        for data in dataloader:
+            # get the inputs
+            inputs = data[0]
+            labels = data[1]
+            fns = data[2]
+
+            inputs = inputs.to(device).clone()
+            labels = labels.to(device)
+
+            inputs.requires_grad = True
+
+            print(inputs.requires_grad)
+            with torch.enable_grad():
+                # outputs, _ = model(inputs)
+
+                # distances = model.prototype_distances(inputs)
+
+                conv_features = model.conv_features(inputs)
+                x2 = conv_features ** 2
+                x2_patch_sum = model.conv_layer1(x2)
+                print(x2_patch_sum.shape)
+
+                p2 = model.prototype_vectors ** 2
+                p2 = torch.sum(p2, dim=(1, 2, 3))
+                # mysum = sum_lrp.apply
+                # p2 = mysum(p2)
+
+                # p2 is a vector of shape (num_prototypes,)
+                # then we reshape it to (num_prototypes, 1, 1)
+                p2_reshape = p2.view(-1, 1, 1)
+
+                xp = model.conv_layer2(conv_features)
+                # print(xp.shape)
+                # print(p2_reshape.shape)
+                # exit()
+                intermediate_result = - 2 * xp + p2_reshape  # use broadcast
+                # x2_patch_sum and intermediate_result are of the same shape
+                distances = model.relu_layer(
+                    x2_patch_sum + intermediate_result)
+
+                # global min pooling
+                # min_distances = -F.max_pool2d(-distances,kernel_size=(7,7))
+                min_distances = -model.max_layer(-distances)
+                min_distances = min_distances.view(-1, model.num_prototypes)
+
+            min_distances = torch.log(
+                (min_distances + 1) / (min_distances + model.epsilon))
+
+            '''For whole classes'''
+            # scores = model.last_layer(min_distances)
+            # print(scores[:,cls])
+            # (scores[:,cls]).backward()
+
+            '''For only class cls'''
+            # scores = model.last_layer.weight.data[cls,cls*10:(cls+1)*10]*(min_distances[:,cls])
+            # # print(scores[:,cls])
+            # torch.sum(scores).backward()
+
+            '''For individual prototype'''
+            (min_distances[:, pno]).backward()
+
+            rel = inputs.grad.data
+            print(torch.max(rel), torch.mean(rel))
+
+            print(fns)
+
+            imshow_im(rel.to('cpu'), imgtensor=inputs.to('cpu'),
+                      folder=foldername, name=fns[0].split("/")[4])
+            # imshow_im(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername,name=fns[0].split("/")[3])
 
 
 def test_model_CLASS(dataloader, dataset_size, model, device):
@@ -572,11 +575,11 @@ def test_model_CLASS(dataloader, dataset_size, model, device):
     cls = 1
 
     # for pno in range(20, 30):
-        # for pno in range(122,123):
-        # foldername = "LISA-LRP-train-50/LISA-"+str(pno)+"/"
-        # foldername = "BD-LISA-LRP-train-20/LISA-"+str(pno)+"/"
-        # foldername = "Jet-Edge-PVOC-LRP-train_only_artefact_horse/PVOC-"+str(pno)+"/"
-        # foldername = "Jet-Edge-LISA-LRP-train-50/LISA-"+str(pno)+"/"
+    # for pno in range(122,123):
+    # foldername = "LISA-LRP-train-50/LISA-"+str(pno)+"/"
+    # foldername = "BD-LISA-LRP-train-20/LISA-"+str(pno)+"/"
+    # foldername = "Jet-Edge-PVOC-LRP-train_only_artefact_horse/PVOC-"+str(pno)+"/"
+    # foldername = "Jet-Edge-LISA-LRP-train-50/LISA-"+str(pno)+"/"
     # foldername = "CLASS-LISA-LRP-train-50/"
     foldername = "LAST-LAYER-SPEED-LISA-LRP-train-BD-15/"
     for data in dataloader:
@@ -619,12 +622,13 @@ def test_model_CLASS(dataloader, dataset_size, model, device):
             min_distances = -model.max_layer(-distances)
             min_distances = min_distances.view(-1, model.num_prototypes)
 
-            min_distances = torch.log((min_distances + 1) / (min_distances + model.epsilon))
+            min_distances = torch.log(
+                (min_distances + 1) / (min_distances + model.epsilon))
 
             '''For whole classes'''
             scores = model.last_layer(min_distances)
-            print(scores[:,cls])
-            (scores[:,cls]).backward()
+            print(scores[:, cls])
+            (scores[:, cls]).backward()
 
         '''For only class cls'''
         # scores = model.last_layer.module.weight.data[cls,cls*10:(cls+1)*10]*(min_distances[:,cls])
@@ -639,10 +643,9 @@ def test_model_CLASS(dataloader, dataset_size, model, device):
 
         print(fns)
 
-        imshow_im(rel.to('cpu'), imgtensor=inputs.to('cpu'), folder=foldername, name=fns[0].split("/")[4])
-            # imshow_edge(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername,name=fns[0].split("/")[3])
-
-
+        imshow_im(rel.to('cpu'), imgtensor=inputs.to('cpu'),
+                  folder=foldername, name=fns[0].split("/")[4])
+        # imshow_edge(rel.to('cpu'),imgtensor = inputs.to('cpu'),folder=foldername,name=fns[0].split("/")[3])
 
 
 class sum_lrp(torch.autograd.Function):
@@ -667,23 +670,22 @@ class sum_lrp(torch.autograd.Function):
 
         input_ = ctx.saved_tensors
         X = input_.clone().detach().requires_grad_(True)
-        #R= lrp_backward(_input= X , layer = layerclass , relevance_output = grad_output[0], eps0 = 1e-12, eps=0)
+        # R= lrp_backward(_input= X , layer = layerclass , relevance_output = grad_output[0], eps0 = 1e-12, eps=0)
         with torch.enable_grad():
             Z = torch.sum(X, dim=(1, 2, 3))
         relevance_output_data = grad_output[0].clone().detach().unsqueeze(0)
         # Z.backward(relevance_output_data)
         # R = X.grad
         R = relevance_output_data*X/Z
-        print('sum R', R.shape )
-        #exit()
-        return R,None
+        print('sum R', R.shape)
+        # exit()
+        return R, None
 
 
-
-def test_model_l2(dataloader, dataset_size,model,n_prototypes,write_path, device):
+def test_model_l2(dataloader, dataset_size, model, n_prototypes, write_path, device):
     model.train(False)
     pno = 0
-    sim = np.zeros((n_prototypes,),dtype=float)
+    sim = np.zeros((n_prototypes,), dtype=float)
     for data in dataloader:
         # get the inputs
         inputs = data[0]
@@ -712,8 +714,7 @@ def test_model_l2(dataloader, dataset_size,model,n_prototypes,write_path, device
             # global max pooling
             min_distances = model.max_layer(similarities)
 
-
-            #### FOR 1st image, max index for maxpool (horse data): 0,6
+            # FOR 1st image, max index for maxpool (horse data): 0,6
 
             min_distances = min_distances.view(-1, model.num_prototypes)
 
@@ -736,12 +737,11 @@ def test_model_l2(dataloader, dataset_size,model,n_prototypes,write_path, device
         print(fns)
         print("\n")
 
-
-        imshow_im(rel.to('cpu'), imgtensor=inputs.to('cpu'), folder=write_path, name=str(pno)+"-PRP.png")
-        sim[pno] = min_distances[:,pno].detach().cpu()
+        imshow_im(rel.to('cpu'), imgtensor=inputs.to('cpu'),
+                  folder=write_path, name=str(pno)+"-PRP.png")
+        sim[pno] = min_distances[:, pno].detach().cpu()
         # pno = pno+1
     return sim
-
 
 
 class ImageFolderWithPaths(datasets.ImageFolder):
@@ -751,7 +751,7 @@ class ImageFolderWithPaths(datasets.ImageFolder):
 
     # override the __getitem__ method. this is the method that dataloader calls
     def __getitem__(self, index):
-        # this is what ImageFolder normally returns 
+        # this is what ImageFolder normally returns
         original_tuple = super(ImageFolderWithPaths, self).__getitem__(index)
         # the image file path
         path = self.imgs[index][0]
@@ -760,160 +760,164 @@ class ImageFolderWithPaths(datasets.ImageFolder):
         return tuple_with_path
 
 
-
-
-def heatmap(R,sx,sy,name):
+def heatmap(R, sx, sy, name):
     # b = 10*np.abs(R).mean()
     b = 10*((np.abs(R)**3.0).mean()**(1.0/3))
 
     from matplotlib.colors import ListedColormap
     my_cmap = plt.cm.seismic(np.arange(plt.cm.seismic.N))
-    my_cmap[:,0:3] *= 0.85
+    my_cmap[:, 0:3] *= 0.85
     my_cmap = ListedColormap(my_cmap)
-    plt.figure(figsize=(sx,sy))
-    plt.subplots_adjust(left=0,right=1,bottom=0,top=1)
+    plt.figure(figsize=(sx, sy))
+    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
     plt.axis('off')
-    plt.imshow(R,cmap=my_cmap,vmin=-b,vmax=b,interpolation='nearest')
+    plt.imshow(R, cmap=my_cmap, vmin=-b, vmax=b, interpolation='nearest')
     plt.savefig(name)
     plt.clf()
 
+
 def run_prp(ppnet, test_dir, n_prototypes, write_path):
 
+    # transforms
 
-  #transforms
+    img_size = ppnet.img_size
+    ppnet = ppnet.cuda()
+    normalize = transforms.Normalize(mean=mean,
+                                     std=std)
 
-  img_size = ppnet.img_size
-  ppnet = ppnet.cuda()
-  normalize = transforms.Normalize(mean=mean,
-                                   std=std)
+    model = resnet34_canonized(pretrained=False)
+    test_dataset = ImageFolderWithPaths(
+        test_dir,
+        transforms.Compose([
+            transforms.Resize(size=(img_size, img_size)),
+            transforms.ToTensor(),
+            normalize,
+        ]))
+    dataset_size = len(test_dataset)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=1, shuffle=False,
+        num_workers=4, pin_memory=False)
 
-  model = resnet34_canonized(pretrained=False)
-  test_dataset = ImageFolderWithPaths(
-      test_dir,
-      transforms.Compose([
-          transforms.Resize(size=(img_size, img_size)),
-          transforms.ToTensor(),
-          normalize,
-      ]))
-  dataset_size = len(test_dataset)
-  test_loader = torch.utils.data.DataLoader(
-      test_dataset, batch_size=1, shuffle=False,
-      num_workers=4, pin_memory=False)
+    lrp_params_def1 = {
+        'conv2d_ignorebias': True,
+        'eltwise_eps': 1e-6,
+        'linear_eps': 1e-6,
+        'pooling_eps': 1e-6,
+        'use_zbeta': True,
+    }
 
+    lrp_layer2method = {
+        'nn.ReLU':          relu_wrapper_fct,
+        'nn.Sigmoid':          sigmoid_wrapper_fct,
+        'nn.BatchNorm2d':   relu_wrapper_fct,
+        'nn.Conv2d':        conv2d_beta0_wrapper_fct,
+        'nn.Linear':        linearlayer_eps_wrapper_fct,
+        'nn.AdaptiveAvgPool2d': adaptiveavgpool2d_wrapper_fct,
+        'nn.MaxPool2d': maxpool2d_wrapper_fct,
+        # 'nn.MaxPool2d': avgpool2d_wrapper_fct,
+        'sum_stacked2': eltwisesum_stacked2_eps_wrapper_fct
+    }
 
-  lrp_params_def1={
-    'conv2d_ignorebias': True, 
-    'eltwise_eps': 1e-6,
-    'linear_eps': 1e-6,
-    'pooling_eps': 1e-6,
-    'use_zbeta': True ,
-  }
+    model.copyfromresnet(
+        ppnet.features, lrp_params=lrp_params_def1, lrp_layer2method=lrp_layer2method)
 
-  lrp_layer2method={
-    'nn.ReLU':          relu_wrapper_fct,
-    'nn.Sigmoid':          sigmoid_wrapper_fct,
-    'nn.BatchNorm2d':   relu_wrapper_fct,
-    'nn.Conv2d':        conv2d_beta0_wrapper_fct,
-    'nn.Linear':        linearlayer_eps_wrapper_fct,  
-    'nn.AdaptiveAvgPool2d': adaptiveavgpool2d_wrapper_fct,
-    'nn.MaxPool2d': maxpool2d_wrapper_fct,
-    # 'nn.MaxPool2d': avgpool2d_wrapper_fct,
-    'sum_stacked2': eltwisesum_stacked2_eps_wrapper_fct
-  }
+    model = model.cuda()
+    ppnet.features = model
 
-  model.copyfromresnet(ppnet.features, lrp_params=lrp_params_def1, lrp_layer2method = lrp_layer2method)
-  
-  
-  model = model.cuda()
-  ppnet.features = model
-  
-  add_on_layers = nn.Sequential(
-                nn.Conv2d(in_channels=512, out_channels=128, kernel_size=1),
-                nn.ReLU(),
-                nn.Conv2d(in_channels=128, out_channels=128, kernel_size=1),
-                nn.Sigmoid()
-                )
-  
-  conv_layer1 = nn.Conv2d(ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).cuda()
-  conv_layer1.weight.data = ppnet.ones
-  
-  wrapped = get_lrpwrapperformodule( copy.deepcopy(conv_layer1) , lrp_params_def1, lrp_layer2method)
-  conv_layer1 = wrapped
-  
-  
-  conv_layer2 = nn.Conv2d(ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).cuda()
-  conv_layer2.weight.data = ppnet.prototype_vectors
-  
-  wrapped = get_lrpwrapperformodule( copy.deepcopy(conv_layer2) , lrp_params_def1, lrp_layer2method)
-  conv_layer2 = wrapped
-  
-  relu_layer = nn.ReLU().cuda()
-  wrapped = get_lrpwrapperformodule( copy.deepcopy(relu_layer) , lrp_params_def1, lrp_layer2method)
-  relu_layer = wrapped
-  
-  
-  last_layer = nn.Linear(ppnet.num_prototypes, ppnet.num_classes,bias=False).cuda()
-  wrapped = get_lrpwrapperformodule( copy.deepcopy(ppnet.last_layer) , lrp_params_def1, lrp_layer2method)
-  last_layer = wrapped
-  # setbyname(conv_layer1,wrapped)
-  
-      
-  def setbyname(obj,name,value):
+    add_on_layers = nn.Sequential(
+        nn.Conv2d(in_channels=512, out_channels=128, kernel_size=1),
+        nn.ReLU(),
+        nn.Conv2d(in_channels=128, out_channels=128, kernel_size=1),
+        nn.Sigmoid()
+    )
 
-    def iteratset(obj,components,value):
+    conv_layer1 = nn.Conv2d(
+        ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).cuda()
+    conv_layer1.weight.data = ppnet.ones
 
-      if not hasattr(obj,components[0]):
-        print(components[0])
-        return False
-      elif len(components)==1:
-        setattr(obj,components[0],value)
-        #print('found!!', components[0])
-        #exit()
-        return True
-      else:
-        nextobj=getattr(obj,components[0])
-        return iteratset(nextobj,components[1:],value)
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        conv_layer1), lrp_params_def1, lrp_layer2method)
+    conv_layer1 = wrapped
 
-    components=name.split('.')
-    # print(components)
-    success=iteratset(obj,components,value)
-    return success
-    
-    
-  add_on_layers = _addon_canonized()
-  print(add_on_layers)
-  for src_module_name, src_module in ppnet.add_on_layers.named_modules():
-    if isinstance(src_module, nn.Conv2d):
-        print(hasattr(add_on_layers.addon,src_module_name))
-        wrapped = get_lrpwrapperformodule( copy.deepcopy(src_module) , lrp_params_def1, lrp_layer2method)
-        setbyname(add_on_layers.addon,src_module_name,wrapped)
-        
-    if isinstance(src_module, nn.ReLU):
-        print(hasattr(add_on_layers.addon,src_module_name))
-        wrapped = get_lrpwrapperformodule( copy.deepcopy(src_module) , lrp_params_def1, lrp_layer2method)
-        setbyname(add_on_layers.addon,src_module_name,wrapped)
-        
-    if isinstance(src_module, nn.Sigmoid):
-        print(hasattr(add_on_layers.addon,src_module_name))
-        wrapped = get_lrpwrapperformodule( copy.deepcopy(src_module) , lrp_params_def1, lrp_layer2method)
-        setbyname(add_on_layers.addon,src_module_name,wrapped)
-        
+    conv_layer2 = nn.Conv2d(
+        ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).cuda()
+    conv_layer2.weight.data = ppnet.prototype_vectors
 
-  ppnet.max_layer = torch.nn.MaxPool2d((7,7), return_indices=False)
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        conv_layer2), lrp_params_def1, lrp_layer2method)
+    conv_layer2 = wrapped
 
-  ## Maxpool
-  ppnet.max_layer = get_lrpwrapperformodule( copy.deepcopy(ppnet.max_layer) , lrp_params_def1, lrp_layer2method)
+    relu_layer = nn.ReLU().cuda()
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        relu_layer), lrp_params_def1, lrp_layer2method)
+    relu_layer = wrapped
 
-  ## AvgPool
-  add_on_layers = add_on_layers.cuda()
-  ppnet.add_on_layers = add_on_layers.addon
-  
-  ppnet.conv_layer1 = conv_layer1
-  ppnet.conv_layer2 = conv_layer2
-  ppnet.relu_layer = relu_layer
-  ppnet.last_layer = last_layer
-  sim = test_model_l2(test_loader, dataset_size, ppnet,n_prototypes,write_path, device=torch.device('cuda'))
-  return sim
+    last_layer = nn.Linear(ppnet.num_prototypes,
+                           ppnet.num_classes, bias=False).cuda()
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        ppnet.last_layer), lrp_params_def1, lrp_layer2method)
+    last_layer = wrapped
+    # setbyname(conv_layer1,wrapped)
+
+    def setbyname(obj, name, value):
+
+        def iteratset(obj, components, value):
+
+            if not hasattr(obj, components[0]):
+                print(components[0])
+                return False
+            elif len(components) == 1:
+                setattr(obj, components[0], value)
+                # print('found!!', components[0])
+                # exit()
+                return True
+            else:
+                nextobj = getattr(obj, components[0])
+                return iteratset(nextobj, components[1:], value)
+
+        components = name.split('.')
+        # print(components)
+        success = iteratset(obj, components, value)
+        return success
+
+    add_on_layers = _addon_canonized()
+    print(add_on_layers)
+    for src_module_name, src_module in ppnet.add_on_layers.named_modules():
+        if isinstance(src_module, nn.Conv2d):
+            print(hasattr(add_on_layers.addon, src_module_name))
+            wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                src_module), lrp_params_def1, lrp_layer2method)
+            setbyname(add_on_layers.addon, src_module_name, wrapped)
+
+        if isinstance(src_module, nn.ReLU):
+            print(hasattr(add_on_layers.addon, src_module_name))
+            wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                src_module), lrp_params_def1, lrp_layer2method)
+            setbyname(add_on_layers.addon, src_module_name, wrapped)
+
+        if isinstance(src_module, nn.Sigmoid):
+            print(hasattr(add_on_layers.addon, src_module_name))
+            wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                src_module), lrp_params_def1, lrp_layer2method)
+            setbyname(add_on_layers.addon, src_module_name, wrapped)
+
+    ppnet.max_layer = torch.nn.MaxPool2d((7, 7), return_indices=False)
+
+    # Maxpool
+    ppnet.max_layer = get_lrpwrapperformodule(copy.deepcopy(
+        ppnet.max_layer), lrp_params_def1, lrp_layer2method)
+
+    # AvgPool
+    add_on_layers = add_on_layers.cuda()
+    ppnet.add_on_layers = add_on_layers.addon
+
+    ppnet.conv_layer1 = conv_layer1
+    ppnet.conv_layer2 = conv_layer2
+    ppnet.relu_layer = relu_layer
+    ppnet.last_layer = last_layer
+    sim = test_model_l2(test_loader, dataset_size, ppnet,
+                        n_prototypes, write_path, device=torch.device('cuda'))
+    return sim
 
 
 def make_prp_model(ppnet, device):
@@ -923,7 +927,6 @@ def make_prp_model(ppnet, device):
     ppnet = ppnet.to(device)
 
     model = resnet34_canonized(pretrained=False)
-
 
     lrp_params_def1 = {
         'conv2d_ignorebias': True,
@@ -945,7 +948,8 @@ def make_prp_model(ppnet, device):
         'sum_stacked2': eltwisesum_stacked2_eps_wrapper_fct
     }
 
-    model.copyfromresnet(ppnet.features, lrp_params=lrp_params_def1, lrp_layer2method=lrp_layer2method)
+    model.copyfromresnet(
+        ppnet.features, lrp_params=lrp_params_def1, lrp_layer2method=lrp_layer2method)
 
     model = model.to(device)
     ppnet.features = model
@@ -957,24 +961,31 @@ def make_prp_model(ppnet, device):
         nn.Sigmoid()
     )
 
-    conv_layer1 = nn.Conv2d(ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).to(device)
+    conv_layer1 = nn.Conv2d(
+        ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).to(device)
     conv_layer1.weight.data = ppnet.ones
 
-    wrapped = get_lrpwrapperformodule(copy.deepcopy(conv_layer1), lrp_params_def1, lrp_layer2method)
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        conv_layer1), lrp_params_def1, lrp_layer2method)
     conv_layer1 = wrapped
 
-    conv_layer2 = nn.Conv2d(ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).to(device)
+    conv_layer2 = nn.Conv2d(
+        ppnet.prototype_shape[1], ppnet.prototype_shape[0], kernel_size=1, bias=False).to(device)
     conv_layer2.weight.data = ppnet.prototype_vectors
 
-    wrapped = get_lrpwrapperformodule(copy.deepcopy(conv_layer2), lrp_params_def1, lrp_layer2method)
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        conv_layer2), lrp_params_def1, lrp_layer2method)
     conv_layer2 = wrapped
 
     relu_layer = nn.ReLU().cuda()
-    wrapped = get_lrpwrapperformodule(copy.deepcopy(relu_layer), lrp_params_def1, lrp_layer2method)
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        relu_layer), lrp_params_def1, lrp_layer2method)
     relu_layer = wrapped
 
-    last_layer = nn.Linear(ppnet.num_prototypes, ppnet.num_classes, bias=False).to(device)
-    wrapped = get_lrpwrapperformodule(copy.deepcopy(ppnet.last_layer), lrp_params_def1, lrp_layer2method)
+    last_layer = nn.Linear(ppnet.num_prototypes,
+                           ppnet.num_classes, bias=False).to(device)
+    wrapped = get_lrpwrapperformodule(copy.deepcopy(
+        ppnet.last_layer), lrp_params_def1, lrp_layer2method)
     last_layer = wrapped
 
     # setbyname(conv_layer1,wrapped)
@@ -1005,25 +1016,29 @@ def make_prp_model(ppnet, device):
     for src_module_name, src_module in ppnet.add_on_layers.named_modules():
         if isinstance(src_module, nn.Conv2d):
             print(hasattr(add_on_layers.addon, src_module_name))
-            wrapped = get_lrpwrapperformodule(copy.deepcopy(src_module), lrp_params_def1, lrp_layer2method)
+            wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                src_module), lrp_params_def1, lrp_layer2method)
             setbyname(add_on_layers.addon, src_module_name, wrapped)
 
         if isinstance(src_module, nn.ReLU):
             print(hasattr(add_on_layers.addon, src_module_name))
-            wrapped = get_lrpwrapperformodule(copy.deepcopy(src_module), lrp_params_def1, lrp_layer2method)
+            wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                src_module), lrp_params_def1, lrp_layer2method)
             setbyname(add_on_layers.addon, src_module_name, wrapped)
 
         if isinstance(src_module, nn.Sigmoid):
             print(hasattr(add_on_layers.addon, src_module_name))
-            wrapped = get_lrpwrapperformodule(copy.deepcopy(src_module), lrp_params_def1, lrp_layer2method)
+            wrapped = get_lrpwrapperformodule(copy.deepcopy(
+                src_module), lrp_params_def1, lrp_layer2method)
             setbyname(add_on_layers.addon, src_module_name, wrapped)
 
     ppnet.max_layer = torch.nn.MaxPool2d((7, 7), return_indices=False)
 
-    ## Maxpool
-    ppnet.max_layer = get_lrpwrapperformodule(copy.deepcopy(ppnet.max_layer), lrp_params_def1, lrp_layer2method)
+    # Maxpool
+    ppnet.max_layer = get_lrpwrapperformodule(copy.deepcopy(
+        ppnet.max_layer), lrp_params_def1, lrp_layer2method)
 
-    ## AvgPool
+    # AvgPool
     add_on_layers = add_on_layers.to(device)
     ppnet.add_on_layers = add_on_layers.addon
 
@@ -1034,7 +1049,7 @@ def make_prp_model(ppnet, device):
     return ppnet
 
 
-def run_prp_image(model,inputs,pno, device):
+def run_prp_image(model, inputs, pno, device):
     inputs = inputs.to(device)
     inputs.requires_grad = True
 
@@ -1052,7 +1067,7 @@ def run_prp_image(model,inputs,pno, device):
         # global max pooling
         min_distances = model.max_layer(similarities)
 
-        #### FOR 1st image, max index for maxpool (horse data): 0,6
+        # FOR 1st image, max index for maxpool (horse data): 0,6
 
         min_distances = min_distances.view(-1, model.num_prototypes)
 
@@ -1074,11 +1089,3 @@ def run_prp_image(model,inputs,pno, device):
     prp = imshow_im(rel.to('cpu'), imgtensor=inputs.to('cpu'))
 
     return prp
-
-
-
-
-
-
-
-
