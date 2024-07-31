@@ -235,8 +235,8 @@ for epoch in range(epoch_start, num_train_epochs):
                                                 target_accu=0.1, log=log)
 
     wandb.log({
-        "Test Acc": accu,
-        "Best Acc": best_acc,
+        "Test F1": accu,
+        "Best F1": best_acc,
         "Best Epoch": best_epoch})
 
 
@@ -260,6 +260,7 @@ for j in range(n_prototypes):
 PRP_path = results_path + 'PRP_maps/'
 makedir(PRP_path)
 only_PRP_path = results_path+'PRP_maps/onlyPRP/'
+n_prototypes = ppnet_multi.module.num_prototypes
 makedir(only_PRP_path)
 sim = run_prp(copy.deepcopy(best_model), results_path +
               '/prototype_images/', n_prototypes, PRP_path)
