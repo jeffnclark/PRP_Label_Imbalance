@@ -42,6 +42,11 @@ from lrp_resnet_canonized_poolconv_prototypes import *
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Set deterministic options
+tnt.set_deterministic()
+
+
 wandb.init(project='X-ray-imbalance',  # entity='sga069'
            )
 
@@ -92,7 +97,7 @@ train_dataset = datasets.ImageFolder(
     ]))
 train_loader = torch.utils.data.DataLoader(
     train_dataset, batch_size=train_batch_size, shuffle=True,
-    num_workers=4, pin_memory=False)
+    num_workers=4, pin_memory=False, worker_init_fn=tnt.worker_init_fn)
 # push set
 train_push_dataset = datasets.ImageFolder(
     train_push_dir,
@@ -102,7 +107,7 @@ train_push_dataset = datasets.ImageFolder(
     ]))
 train_push_loader = torch.utils.data.DataLoader(
     train_push_dataset, batch_size=train_push_batch_size, shuffle=False,
-    num_workers=4, pin_memory=False)
+    num_workers=4, pin_memory=False, worker_init_fn=tnt.worker_init_fn)
 # test set
 val_dataset = datasets.ImageFolder(
     val_dir,
@@ -113,7 +118,7 @@ val_dataset = datasets.ImageFolder(
     ]))
 val_loader = torch.utils.data.DataLoader(
     val_dataset, batch_size=val_batch_size, shuffle=False,
-    num_workers=4, pin_memory=False)
+    num_workers=4, pin_memory=False, worker_init_fn=tnt.worker_init_fn)
 
 # we should look into distributed sampler more carefully at torch.utils.data.distributed.DistributedSampler(train_dataset)
 log('training set size: {0}'.format(len(train_loader.dataset)))

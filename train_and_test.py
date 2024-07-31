@@ -1,6 +1,6 @@
 import time
 import torch
-
+import random
 from sklearn.metrics import f1_score, precision_score, recall_score
 
 from helpers import list_of_distances, make_one_hot
@@ -9,6 +9,23 @@ from helpers import list_of_distances, make_one_hot
 from sklearn.metrics import f1_score, precision_score, recall_score
 import numpy as np
 import wandb
+
+# Function to ensure deterministic behavior
+def set_deterministic(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def worker_init_fn(worker_id):
+    # Seed all workers with the same seed
+    seed = 42
+    np.random.seed(seed + worker_id)
+    torch.manual_seed(seed + worker_id)
 
 
 def _train_or_test(model, dataloader, optimizer=None, class_specific=True, use_l1_mask=True,
