@@ -6,8 +6,8 @@ from settings import coefs
 from settings import last_layer_optimizer_lr
 from settings import warm_optimizer_lrs
 from settings import joint_optimizer_lrs, joint_lr_step_size
-from settings import train_dir, test_dir, train_push_dir, \
-    train_batch_size, test_batch_size, train_push_batch_size
+from settings import train_dir, val_dir, train_push_dir, \
+    train_batch_size, val_batch_size, train_push_batch_size
 from settings import base_architecture, img_size, prototype_shape, num_classes, \
     prototype_activation_function, add_on_layers_type, experiment_run
 import os
@@ -104,21 +104,21 @@ train_push_loader = torch.utils.data.DataLoader(
     train_push_dataset, batch_size=train_push_batch_size, shuffle=False,
     num_workers=4, pin_memory=False)
 # test set
-test_dataset = datasets.ImageFolder(
-    test_dir,
+val_dataset = datasets.ImageFolder(
+    val_dir,
     transforms.Compose([
         transforms.Resize(size=(img_size, img_size)),
         transforms.ToTensor(),
         normalize,
     ]))
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, batch_size=test_batch_size, shuffle=False,
+val_loader = torch.utils.data.DataLoader(
+    val_dataset, batch_size=val_batch_size, shuffle=False,
     num_workers=4, pin_memory=False)
 
 # we should look into distributed sampler more carefully at torch.utils.data.distributed.DistributedSampler(train_dataset)
 log('training set size: {0}'.format(len(train_loader.dataset)))
 log('push set size: {0}'.format(len(train_push_loader.dataset)))
-log('test set size: {0}'.format(len(test_loader.dataset)))
+log('val set size: {0}'.format(len(val_loader.dataset)))
 log('batch size: {0}'.format(train_batch_size))
 
 # construct the model
@@ -167,7 +167,7 @@ last_layer_optimizer = torch.optim.Adam(last_layer_optimizer_specs)
 
 # train the model
 log('start training')
-best_acc = 0
+best_f1 = 0
 best_epoch = 0
 best_protopnet_heatmaps = []
 best_prototype_images_path = []
@@ -185,10 +185,10 @@ for epoch in range(epoch_start, num_train_epochs):
         _ = tnt.train(model=ppnet_multi, dataloader=train_loader, optimizer=joint_optimizer,
                       class_specific=class_specific, coefs=coefs, log=log)
 
-    accu = tnt.test(model=ppnet_multi, dataloader=test_loader,
-                    class_specific=class_specific, log=log)
-    # save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + 'nopush', accu=accu,
-    #                             target_accu=0.70, log=log)
+    f1 = tnt.test(model=ppnet_multi, dataloader=val_loader,
+                  class_specific=class_specific, log=log)
+    # save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + 'nopush', f1=f1,
+    #                             target_f1=0.70, log=log)
 
     if epoch >= push_start and epoch in push_epochs:
         protopnet_heatmaps_path, prototype_images_path = push.push_prototypes(
@@ -212,10 +212,10 @@ for epoch in range(epoch_start, num_train_epochs):
         # table = wandb.Table(data=saved_prototypes, columns=columns)
         # wandb.log({"prototypes": table})
 
-        accu = tnt.test(model=ppnet_multi, dataloader=test_loader,
-                        class_specific=class_specific, log=log)
-        # save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + 'push', accu=accu,
-        #                             target_accu=0.90, log=log)
+        f1 = tnt.test(model=ppnet_multi, dataloader=val_loader,
+                      class_specific=class_specific, log=log)
+        # save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + 'push', f1=f1,
+        #                             target_f1=0.90, log=log)
 
         if prototype_activation_function != 'linear':
             tnt.last_only(model=ppnet_multi, log=log)
@@ -223,20 +223,20 @@ for epoch in range(epoch_start, num_train_epochs):
                 log('iteration: \t{0}'.format(i))
                 _ = tnt.train(model=ppnet_multi, dataloader=train_loader, optimizer=last_layer_optimizer,
                               class_specific=class_specific, coefs=coefs, log=log)
-                accu = tnt.test(model=ppnet_multi, dataloader=test_loader,
-                                class_specific=class_specific, log=log)
-                if (accu >= best_acc):
-                    best_acc = accu
+                f1 = tnt.test(model=ppnet_multi, dataloader=val_loader,
+                              class_specific=class_specific, log=log)
+                if (f1 >= best_f1):
+                    best_f1 = f1
                     best_epoch = epoch
                     best_protopnet_heatmaps = protopnet_heatmaps_path
                     best_prototype_images_path = prototype_images_path
                     best_model = copy.deepcopy(ppnet)
-                    save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + '_' + 'push', accu=accu,
-                                                target_accu=0.1, log=log)
+                    save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + '_' + 'push', f1=f1,
+                                                target_f1=0.1, log=log)
 
     wandb.log({
-        "Test F1": accu,
-        "Best F1": best_acc,
+        "Validation F1": f1,
+        "Best F1": best_f1,
         "Best Epoch": best_epoch})
 
 
@@ -287,7 +287,7 @@ for j in range(n_prototypes):
     plt.savefig(subplot_dir+str(j)+".png")
 
 
-# Test accuracies save
+# Test f1 scores save
 best_model_multi = torch.nn.DataParallel(best_model.to(device))
 
 
@@ -307,8 +307,8 @@ def cm(test_dir, filename, class_names):
         num_workers=4, pin_memory=False)
     print('test set size: {0}'.format(len(test_loader.dataset)))
 
-    accu, pred, true = tnt_2.test(model=best_model_multi, dataloader=test_loader,
-                                  class_specific=class_specific, log=print)
+    f1, pred, true = tnt_2.test(model=best_model_multi, dataloader=test_loader,
+                                class_specific=class_specific, log=print)
 
 
 logclose()

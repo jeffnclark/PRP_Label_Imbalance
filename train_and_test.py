@@ -8,6 +8,7 @@ from helpers import list_of_distances, make_one_hot
 
 from sklearn.metrics import f1_score, precision_score, recall_score
 import numpy as np
+import wandb
 
 
 def _train_or_test(model, dataloader, optimizer=None, class_specific=True, use_l1_mask=True,
@@ -146,6 +147,10 @@ def _train_or_test(model, dataloader, optimizer=None, class_specific=True, use_l
     for class_idx, (f1, precision, recall) in enumerate(zip(class_f1_scores, class_precisions, class_recalls)):
         log('\tClass {0} - F1: {1:.4f}, Precision: {2:.4f}, Recall: {3:.4f}'.format(
             class_idx, f1, precision, recall))
+        if optimizer is not None:
+            wandb.log({f'f1_train_class_{class_idx}': f1})
+        else:
+            wandb.log({f'f1_val_class_{class_idx}': f1})
 
     overall_f1 = f1_score(all_targets, all_predictions, average='weighted')
     overall_precision = precision_score(
