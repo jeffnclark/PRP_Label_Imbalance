@@ -11,6 +11,8 @@ import numpy as np
 import wandb
 
 # Function to ensure deterministic behavior
+
+
 def set_deterministic(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -177,13 +179,26 @@ def _train_or_test(model, dataloader, optimizer=None, class_specific=True, use_l
 
     log('\tOverall - F1: {0:.4f}, Precision: {1:.4f}, Recall: {2:.4f}'.format(
         overall_f1, overall_precision, overall_recall))
+
     log('\tl1: \t\t{0}'.format(
         model.module.last_layer.weight.norm(p=1).item()))
+    # log l1 with W&B
+    if optimizer is not None:
+        wandb.log({f'l1 train': model.module.last_layer.weight.norm(p=1).item()})
+    else:
+        wandb.log({f'l1 val': model.module.last_layer.weight.norm(p=1).item()})
+
     p = model.module.prototype_vectors.view(
         model.module.num_prototypes, -1).cpu()
+
     with torch.no_grad():
         p_avg_pair_dist = torch.mean(list_of_distances(p, p))
     log('\tp dist pair: \t{0}'.format(p_avg_pair_dist.item()))
+    # log p dist pair with W&B
+    if optimizer is not None:
+        wandb.log({f'p dist pair train': p_avg_pair_dist.item()})
+    else:
+        wandb.log({f'p dist pair val': p_avg_pair_dist.item()})
 
     return overall_f1
 

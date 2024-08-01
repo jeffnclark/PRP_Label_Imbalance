@@ -1,6 +1,6 @@
 base_architecture = 'resnet34'
 img_size = 224
-num_classes = 3
+num_classes = 8
 num_prototypes_per_class = 10
 total_prototypes = num_classes * num_prototypes_per_class
 prototype_shape = (total_prototypes, 128, 1, 1)
@@ -10,7 +10,7 @@ add_on_layers_type = 'regular'
 experiment_run = 'eight-small-poc/'
 
 data_home = 'Data/chestxray/multi/'
-data_path = data_home + 'small/'
+data_path = data_home + '8_30000/'
 
 
 # Train
@@ -41,7 +41,7 @@ coefs = {
 }
 
 epoch_start = 0
-num_train_epochs = 31  # Eventually switch back to 31
+num_train_epochs = 11  # Eventually switch back to 31
 num_warm_epochs = 5
 
 push_start = 10
