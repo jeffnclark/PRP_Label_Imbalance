@@ -1,16 +1,16 @@
 base_architecture = 'resnet34'
 img_size = 224
-num_classes = 8
+num_classes = 4
 num_prototypes_per_class = 10
 total_prototypes = num_classes * num_prototypes_per_class
 prototype_shape = (total_prototypes, 128, 1, 1)
 prototype_activation_function = 'log'
 add_on_layers_type = 'regular'
 
-experiment_run = 'eight-small-poc/'
+experiment_run = '8_30000_4_class/'
 
 data_home = 'Data/chestxray/multi/'
-data_path = data_home + '8_30000/'
+data_path = data_home + '8_30000_deterministic/'
 
 
 # Train

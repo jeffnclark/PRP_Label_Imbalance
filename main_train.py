@@ -47,7 +47,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 tnt.set_deterministic()
 
 
-wandb.init(project='X-ray-imbalance',  # entity='sga069'
+wandb.init(project='X-ray-imbalance',
+           tags=['8_30000_4_later_classes']
+           # entity='sga069'
            )
 
 config = wandb.config
