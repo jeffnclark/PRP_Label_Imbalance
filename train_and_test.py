@@ -182,11 +182,6 @@ def _train_or_test(model, dataloader, optimizer=None, class_specific=True, use_l
 
     log('\tl1: \t\t{0}'.format(
         model.module.last_layer.weight.norm(p=1).item()))
-    # log l1 with W&B
-    if optimizer is not None:
-        wandb.log({f'l1 train': model.module.last_layer.weight.norm(p=1).item()})
-    else:
-        wandb.log({f'l1 val': model.module.last_layer.weight.norm(p=1).item()})
 
     p = model.module.prototype_vectors.view(
         model.module.num_prototypes, -1).cpu()
@@ -194,11 +189,24 @@ def _train_or_test(model, dataloader, optimizer=None, class_specific=True, use_l
     with torch.no_grad():
         p_avg_pair_dist = torch.mean(list_of_distances(p, p))
     log('\tp dist pair: \t{0}'.format(p_avg_pair_dist.item()))
-    # log p dist pair with W&B
+
+    # log with W&B
     if optimizer is not None:
-        wandb.log({f'p dist pair train': p_avg_pair_dist.item()})
+        wandb.log({'p dist pair train': p_avg_pair_dist.item()})
+        wandb.log({'l1 train': model.module.last_layer.weight.norm(p=1).item()})
+        wandb.log({'cross ent train': total_cross_entropy / n_batches})
+        if class_specific:
+            wandb.log({'separation train': (total_separation_cost / n_batches)})
+            wandb.log({'avg separation train': (
+                total_avg_separation_cost / n_batches)})
+
     else:
-        wandb.log({f'p dist pair val': p_avg_pair_dist.item()})
+        # wandb.log({f'p dist pair val': p_avg_pair_dist.item()})
+        # wandb.log({f'l1 val': model.module.last_layer.weight.norm(p=1).item()})
+        wandb.log({'cross ent val': total_cross_entropy / n_batches})
+        wandb.log({'separation val': (total_separation_cost / n_batches)})
+        wandb.log({'avg separation val': (
+            total_avg_separation_cost / n_batches)})
 
     return overall_f1
 
